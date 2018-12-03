@@ -117,19 +117,24 @@ void * dispatch(void *arg) {
 /**********************************************************************************/
 
 // Function to retrieve the request from the queue, process it and then return a result to the client
+// 1. Do i really ahve to use conditional variable here? can i build with only lock?
 void * worker(void *arg) {
   int time_start, time_end, time_total, getRequest;
-  char* filename = *(char*)arg;                           //not sure. 
+  char* filename = *(char*)arg;                           //not sure what kind of argument is passed in from main 
 
    while (1) {
      pthread_mutex_lock (&queue_lock);
      time_start = getCurrentTimeInMills();                // Start recording time
-     getRequest = get_request(request_t.fd);
-    if (get_request(int fd, char *filename)) {
-      /* code */
-    }                                                      // Get the request from the queue
+     getRequest = get_request(request_t.fd);              // Get the request from the queue
+    if (get_request(int fd, char *filename) != 0) {       // Get the data from the disk or the cache
+      //check file drive for the file
+      readFromDisk(/*argument. check with Khoa*/);
+    }
+    else{
 
-                                                          // Get the data from the disk or the cache
+    }
+
+
 
     time_end = getCurrentTimeInMills();                 // Stop recording the time
     time_total = time_end - time_start;
