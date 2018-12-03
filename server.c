@@ -118,20 +118,26 @@ void * dispatch(void *arg) {
 
 // Function to retrieve the request from the queue, process it and then return a result to the client
 void * worker(void *arg) {
+  int time_start, time_end, time_total, getRequest;
+  char* filename = *(char*)arg;                           //not sure. 
 
    while (1) {
+     pthread_mutex_lock (&queue_lock);
+     time_start = getCurrentTimeInMills();                // Start recording time
+     getRequest = get_request(request_t.fd);
+    if (get_request(int fd, char *filename)) {
+      /* code */
+    }                                                      // Get the request from the queue
 
-    // Start recording time
+                                                          // Get the data from the disk or the cache
 
-    // Get the request from the queue
+    time_end = getCurrentTimeInMills();                 // Stop recording the time
+    time_total = time_end - time_start;
+    pthread_mutex_unlock (&queue_lock);
 
-    // Get the data from the disk or the cache
+                                                          // Log the request into the file and terminal
 
-    // Stop recording the time
-
-    // Log the request into the file and terminal
-
-    // return the result
+                                                          // return the result
   }
   return NULL;
 }
