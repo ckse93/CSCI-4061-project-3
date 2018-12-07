@@ -21,28 +21,29 @@
 #define BUFF_SIZE 1024
 
 // structs:
-typedef struct request_queue {                                  //Data struct for request
+typedef struct request_queue {
     int fd;
     char request[BUFF_SIZE];
 } request_t;
 
-typedef struct request_array{                                 //Array consisting of request_t
+
+typedef struct request_array{
     int index;
     request_t *requests;
 } request_arr_t;
 
-typedef struct cache_entry{                                   //Data struct for cache
-    //int len;
+typedef struct cache_entry{
+    /* int len; */
     int index;
     char *request;
     char *content;
 }cache_entry_t;
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;               // Lock for request_array
-pthread_cond_t cv_dispatcher = PTHREAD_COND_INITIALIZER;        // Condition variable for dispatcher thread
-pthread_cond_t cv_worker = PTHREAD_COND_INITIALIZER;            // Condition variable for worker thread
-pthread_mutex_t lock_log = PTHREAD_MUTEX_INITIALIZER;           // lock for web_log file
-pthread_mutex_t lock_cache = PTHREAD_MUTEX_INITIALIZER;         //lock for cache
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; // Lock for request_array
+pthread_cond_t cv_dispatcher = PTHREAD_COND_INITIALIZER; // Condition variable for dispatcher thread
+pthread_cond_t cv_worker = PTHREAD_COND_INITIALIZER; // Condition variable for worker thread
+pthread_mutex_t lock_log = PTHREAD_MUTEX_INITIALIZER; // lock for web_log file
+pthread_mutex_t lock_cache = PTHREAD_MUTEX_INITIALIZER; //lock for cache
 
 //Gobal Varibales
 request_arr_t reqs;
@@ -88,6 +89,14 @@ int getCacheIndex(char *request){
     /// return the index if the request is present in the cache
     int i;
     for(i = 0; i < cache_entries; i++){
+        if(cache_en[i].request == NULL){
+            if(i < cache_entries){
+                continue;
+            }
+            else{
+                return -1;
+            }
+        }
         if(strcmp(cache_en[i].request, request) == 0){
             return i;
         }
@@ -96,22 +105,22 @@ int getCacheIndex(char *request){
 }
 
 // Function to add the request and its file content into the cache
-void addIntoCache(char *mybuf, char *memory , int memory_size){
+void addIntoCache(char *mybuf, char *memory, int memory_size){
     // It should add the request at an index according to the cache replacement policy
     // Make sure to allocate/free memeory when adding or replacing cache entries
     int i,j;
     cache_empty_test = 0;
     cache_full_test = 0;
-    if(pthread_mutex_lock(&lock_cache) != 0){
-        fprintf(stderr, "Failed to lock_cache.\n");
-    }
     for (i = 0 ; i < cache_entries; i++){
         if(cache_en[i].content == NULL && cache_en[i].request == NULL && cache_en[i].index == 0){
             //found slot is empty => insert
             free(cache_en[i].content);
             free(cache_en[i].request);
+            cache_en[i].content = malloc(memory_size);
+            cache_en[i].request = malloc(strlen(mybuf));
             cache_en[i].index = i;
             cache_en[i].request = mybuf;
+            /* cache_en[i].content = (char *)realloc(cache_en[i].content, memory_size * sizeof(char)); */
             cache_en[i].content = memory;
             cache_empty_test = 1000;
             break;
@@ -128,12 +137,10 @@ void addIntoCache(char *mybuf, char *memory , int memory_size){
         free(cache_en[replace_entry].request);
         cache_en[replace_entry].index = replace_entry;
         cache_en[replace_entry].request = mybuf;
+        /* cache_en[replace_entry].content = (char *)realloc(cache_en[replace_entry].content, memory_size * sizeof(char)); */
         cache_en[replace_entry].content = memory;
         replace_entry = (replace_entry + 1) % cache_entries;
         cache_full_test = 2000;
-    }
-    if(pthread_mutex_unlock(&lock_cache) != 0){
-        fprintf(stderr, "Failed to unlock lock_cache.\n");
     }
 }
 
@@ -248,14 +255,15 @@ void * worker(void *arg) {
             fprintf(stderr, "Failed to lock.\n");
         }
 
-        // Start recording time
-        start = getCurrentTimeInMicro();
         /* ////////////////Get the request from the queue////////////////// */
         while(reqs.index <= 0){
             if(pthread_cond_wait(&cv_worker, &lock) != 0){
                 fprintf(stderr, "Failed to wait.\n");
             }
         }
+        // Start recording time
+        start = getCurrentTimeInMicro();
+        // get request
         reqs.index = reqs.index -1;
         n_fd = reqs.requests[reqs.index].fd;
         strcpy(filename, reqs.requests[reqs.index].request);
@@ -300,19 +308,33 @@ void * worker(void *arg) {
                     printf("[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing2, "MISS");
                 }
                 else{
+                    char *cache_result;
+                    int nread;
                     // Read from cache
-                    // Read from disk
-                    int nread = readFromDisk(fd,buf,size);
-                     if(nread == -1){
-                        char *error = "Failed to read from Disk.";
-                        return_error(n_fd, error);
-                        end_here3 = getCurrentTimeInMicro();
-                        timing3 = end_here3 - start;
-                        sprintf(web_log, "[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing3, "MISS");
-                        printf("[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing3, "MISS");
+                    int find_entry = getCacheIndex(filename);
+                    if(find_entry != -1){
+                        // CACHE HIT
+                        cache_result = "HIT";
+                        strcpy(buf, cache_en[find_entry].content);
+                        nread = size;
+                    }
+                    else{
+                        // CACHE MISS => READ FROM DISK
+                        cache_result = "MISS";
+                        nread = readFromDisk(fd,buf,size);
+                        if(nread == -1){
+                            char *error = "Failed to read from Disk.";
+                            return_error(n_fd, error);
+                            end_here3 = getCurrentTimeInMicro();
+                            timing3 = end_here3 - start;
+                            sprintf(web_log, "[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing3, "MISS");
+                            printf("[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing3, "MISS");
+                        }
+                        // Add request and content into cache
+                        printf("buf %s", buf);
+                        addIntoCache(filename,buf,nread);
                     }
                     char * type = getContentType(filename);
-
                     int temp_return = return_result(n_fd, type, buf, nread);
                     end_here4 = getCurrentTimeInMicro();
                     timing4 = end_here4 - start;
@@ -323,8 +345,8 @@ void * worker(void *arg) {
                         printf("[%d][%d][%d][%s][%s][%ld ms][%s]\n", id, count, n_fd, filename, error, timing4, "MISS");
                     }
                     else{
-                        sprintf(web_log, "[%d][%d][%d][%s][%d][%ld ms][%s]\n", id, count, n_fd, filename, nread, timing4, "MISS");
-                        printf("[%d][%d][%d][%s][%d][%ld ms][%s]\n", id, count, n_fd, filename, nread, timing4, "MISS");
+                        sprintf(web_log, "[%d][%d][%d][%s][%d][%ld ms][%s]\n", id, count, n_fd, filename, nread, timing4, cache_result);
+                        printf("[%d][%d][%d][%s][%d][%ld ms][%s]\n", id, count, n_fd, filename, nread, timing4, cache_result);
                     }
                 }
             free(buf);
@@ -357,7 +379,9 @@ void free_everything(int sig){
     if(index_worker != NULL){
         free(index_worker);
     }
+    deleteCache();
     close(l_fd);
+    printf("\n");
     exit(0);
 }
 /**********************************************************************************/
@@ -412,7 +436,7 @@ int main(int argc, char **argv) {
     if((init_cache_result = initCache()) == -1){
         fprintf(stderr, "Failed to initial cache.\n");
     }
-    // Opens the webserver_log file
+    // Remove old webserver_log and open/create the webserver_log file
     if(access("webserver_log",F_OK) == 0){
         remove("webserver_log");
     }
